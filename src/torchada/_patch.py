@@ -1439,6 +1439,18 @@ class _AcceleratorModuleWrapper(ModuleType):
 _original_torch_accelerator = None
 
 
+def _make_accelerator_device_overrides(musa_module):
+    """Build torch.accelerator device-index aliases backed by torch.musa."""
+
+    def set_device_index(device_index):
+        musa_module.set_device(device_index)
+
+    def current_device_index():
+        return musa_module.current_device()
+
+    return set_device_index, current_device_index
+
+
 def _make_patched_accelerator_synchronize(musa_module):
     """Build a torch.accelerator.synchronize replacement that delegates to torch.musa."""
 
@@ -1544,6 +1556,11 @@ def _patch_torch_accelerator():
 
     wrapper = _AcceleratorModuleWrapper(_original_torch_accelerator, torch.musa)
 
+    set_device_index, current_device_index = _make_accelerator_device_overrides(torch.musa)
+    wrapper._set_override("set_device_index", set_device_index)
+    wrapper._set_override("set_device_idx", set_device_index)
+    wrapper._set_override("current_device_index", current_device_index)
+    wrapper._set_override("current_device_idx", current_device_index)
     wrapper._set_override("synchronize", _make_patched_accelerator_synchronize(torch.musa))
     device_index_cm, stream_cm = _make_accelerator_context_managers(wrapper)
     if not hasattr(_original_torch_accelerator, "device_index"):

@@ -2470,6 +2470,32 @@ class TestAcceleratorModuleWrapper:
         assert wrapper.empty_cache == "v1"
         assert "empty_cache" in wrapper.__dict__
 
+    def test_device_index_aliases_delegate_to_musa_names(self):
+        """Accelerator device-index APIs must not require torch.musa same-name aliases."""
+        calls = []
+
+        wrapper, _, _ = self._make_wrapper(
+            musa_attrs={
+                "set_device": calls.append,
+                "current_device": lambda: 3,
+            },
+        )
+        from torchada._patch import _make_accelerator_device_overrides
+
+        set_device_index, current_device_index = _make_accelerator_device_overrides(
+            wrapper._musa_module
+        )
+        wrapper._set_override("set_device_index", set_device_index)
+        wrapper._set_override("set_device_idx", set_device_index)
+        wrapper._set_override("current_device_index", current_device_index)
+        wrapper._set_override("current_device_idx", current_device_index)
+
+        wrapper.set_device_index(2)
+        wrapper.set_device_idx(4)
+        assert calls == [2, 4]
+        assert wrapper.current_device_index() == 3
+        assert wrapper.current_device_idx() == 3
+
     def test_dir_includes_attributes_from_both_modules(self):
         """dir() must surface attributes from both wrapped modules and overrides."""
         wrapper, _, _ = self._make_wrapper(
@@ -2509,12 +2535,26 @@ class TestTorchAcceleratorPatching:
         if not torchada.is_musa_platform():
             pytest.skip("Only applicable on MUSA platform")
 
-        # These APIs exist in torch 2.7 torch.accelerator and must be the real ones
         assert torch.accelerator.is_available() is True
         assert isinstance(torch.accelerator.device_count(), int)
         assert isinstance(torch.accelerator.current_device_index(), int)
         # Function objects should come from the real torch.accelerator module
         assert torch.accelerator.is_available.__module__ == "torch.accelerator"
+
+    def test_device_index_apis_use_musa_device_apis(self):
+        """Device-index APIs must work when torch_musa lacks same-name functions."""
+        import torch
+
+        import torchada
+
+        if not torchada.is_musa_platform():
+            pytest.skip("Only applicable on MUSA platform")
+
+        before = torch.accelerator.current_device_index()
+        torch.accelerator.set_device_index(before)
+        torch.accelerator.set_device_idx(before)
+        assert torch.accelerator.current_device_index() == before
+        assert torch.accelerator.current_device_idx() == before
 
     def test_empty_cache_falls_back_to_musa(self):
         """torch.accelerator.empty_cache() must work via torch.musa fallback.
