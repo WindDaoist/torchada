@@ -26,8 +26,29 @@ Usage:
 
 __version__ = "0.1.53"
 
+import enum as _enum
+
+if not hasattr(_enum, "StrEnum"):
+    class _StrEnum(str, _enum.Enum):
+        @staticmethod
+        def _generate_next_value_(name, start, count, last_values):
+            return name.lower()
+
+        def __str__(self) -> str:
+            return str(self.value)
+
+        def __format__(self, format_spec: str) -> str:
+            return format(self.value, format_spec)
+
+    _enum.StrEnum = _StrEnum
+
 from . import cuda, utils
-from ._patch import apply_patches, get_original_init_process_group, is_patched
+from ._patch import (
+    apply_patches,
+    get_original_init_process_group,
+    is_patched,
+    patch_allocator_pool_lifecycle,
+)
 from ._platform import (
     Platform,
     detect_platform,
@@ -57,7 +78,8 @@ set_default_moe_config_dir()
 # Load C++ operator overrides if enabled via TORCHADA_ENABLE_CPP_OPS=1
 from ._cpp_ops import load_cpp_ops
 
-load_cpp_ops()
+cpp_ops_module = load_cpp_ops()
+patch_allocator_pool_lifecycle(cpp_ops_module)
 
 
 def get_version() -> str:

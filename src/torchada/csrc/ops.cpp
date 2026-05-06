@@ -12,6 +12,11 @@
 
 #include "ops.h"
 
+#include <ATen/musa/MUSAContext.h>
+#include <c10/musa/MUSACachingAllocator.h>
+
+#include <thread>
+
 namespace torchada {
 
 // ============================================================================
@@ -59,6 +64,28 @@ void mark_loaded() {
     cpp_ops_loaded = true;
 }
 
+void cuda_begin_allocate_current_thread_to_pool(
+    c10::DeviceIndex device,
+    c10::musa::MempoolId_t mempool_id) {
+    const auto tid = std::this_thread::get_id();
+    c10::musa::MUSACachingAllocator::beginAllocateToPool(
+        device, mempool_id, [tid](musaStream_t) {
+            return std::this_thread::get_id() == tid;
+        });
+}
+
+void cuda_end_allocate_to_pool(
+    c10::DeviceIndex device,
+    c10::musa::MempoolId_t mempool_id) {
+    c10::musa::MUSACachingAllocator::endAllocateToPool(device, mempool_id);
+}
+
+void cuda_release_pool(
+    c10::DeviceIndex device,
+    c10::musa::MempoolId_t mempool_id) {
+    c10::musa::MUSACachingAllocator::releasePool(device, mempool_id);
+}
+
 }  // namespace torchada
 
 // ============================================================================
@@ -74,4 +101,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Get the C++ ops extension version");
     m.def("_mark_loaded", &torchada::mark_loaded,
           "Mark the extension as loaded (internal use)");
+    m.def("_cuda_beginAllocateCurrentThreadToPool",
+          &torchada::cuda_begin_allocate_current_thread_to_pool,
+          "Begin routing current-thread MUSA allocations to a mempool");
+    m.def("_cuda_endAllocateToPool",
+          &torchada::cuda_end_allocate_to_pool,
+          "End routing MUSA allocations to a mempool");
+    m.def("_cuda_releasePool",
+          &torchada::cuda_release_pool,
+          "Release a MUSA mempool");
 }

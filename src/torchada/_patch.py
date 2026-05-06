@@ -666,6 +666,59 @@ class _CudaModuleWrapper(ModuleType):
 
 # Store original torch.cuda module before patching
 _original_torch_cuda = None
+_ALLOCATOR_POOL_LIFECYCLE_NAMES = (
+    "_cuda_beginAllocateCurrentThreadToPool",
+    "_cuda_endAllocateToPool",
+    "_cuda_releasePool",
+)
+
+
+def _resolve_allocator_pool_lifecycle(name: str) -> Callable[..., Any]:
+    from ._cpp_ops import get_module, load_cpp_ops
+
+    cpp_ops_module = get_module() or load_cpp_ops(require_env=False)
+    if cpp_ops_module is None or not hasattr(cpp_ops_module, name):
+        raise RuntimeError(f"torchada C++ allocator lifecycle op {name} is unavailable")
+
+    patch_allocator_pool_lifecycle(cpp_ops_module)
+    return getattr(cpp_ops_module, name)
+
+
+def _make_allocator_pool_lifecycle_wrapper(name: str) -> Callable[..., Any]:
+    def lifecycle_wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _resolve_allocator_pool_lifecycle(name)(*args, **kwargs)
+
+    lifecycle_wrapper.__name__ = name
+    lifecycle_wrapper.__qualname__ = name
+    return lifecycle_wrapper
+
+
+def patch_allocator_pool_lifecycle(cpp_ops_module: Optional[object] = None) -> None:
+    if not hasattr(torch, "musa") or not hasattr(torch.musa, "memory"):
+        return
+
+    musa_memory_module = torch.musa.memory
+    if musa_memory_module is None:
+        return
+
+    if cpp_ops_module is None:
+        try:
+            from ._cpp_ops import get_module
+
+            cpp_ops_module = get_module()
+        except ImportError:
+            cpp_ops_module = None
+
+    sys.modules["torch.cuda.memory"] = musa_memory_module
+    for name in _ALLOCATOR_POOL_LIFECYCLE_NAMES:
+        if cpp_ops_module is not None and hasattr(cpp_ops_module, name):
+            lifecycle_func = getattr(cpp_ops_module, name)
+        elif hasattr(musa_memory_module, name):
+            lifecycle_func = getattr(musa_memory_module, name)
+        else:
+            lifecycle_func = _make_allocator_pool_lifecycle_wrapper(name)
+        setattr(musa_memory_module, name, lifecycle_func)
+        setattr(torch._C, name, lifecycle_func)
 
 
 @patch_function
@@ -716,11 +769,22 @@ def _patch_torch_cuda_module():
             musa_memory_module = torch.musa.memory
             if musa_memory_module is not None:
                 sys.modules["torch.cuda.memory"] = musa_memory_module
-                # Add CUDAPluggableAllocator alias pointing to MUSAPluggableAllocator
-                if hasattr(musa_memory_module, "MUSAPluggableAllocator"):
-                    musa_memory_module.CUDAPluggableAllocator = (
-                        musa_memory_module.MUSAPluggableAllocator
-                    )
+                memory_aliases = {
+                    "CUDAPluggableAllocator": "MUSAPluggableAllocator",
+                }
+                for cuda_name, musa_name in memory_aliases.items():
+                    if not hasattr(musa_memory_module, cuda_name) and hasattr(
+                        musa_memory_module, musa_name
+                    ):
+                        setattr(
+                            musa_memory_module,
+                            cuda_name,
+                            getattr(musa_memory_module, musa_name),
+                        )
+                for name in ("MemPool", "use_mem_pool"):
+                    if hasattr(musa_memory_module, name) and not hasattr(torch.musa, name):
+                        setattr(torch.musa, name, getattr(musa_memory_module, name))
+                patch_allocator_pool_lifecycle()
 
         # Patch torch.cuda.graph context manager to accept cuda_graph= keyword
         # MUSA's graph class uses musa_graph= but CUDA code uses cuda_graph=

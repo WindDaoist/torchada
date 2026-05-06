@@ -71,16 +71,18 @@ def _detect_musa_arch() -> str:
     return arch
 
 
-def load_cpp_ops(force_reload: bool = False) -> Optional[object]:
+def load_cpp_ops(
+    force_reload: bool = False, *, require_env: bool = True
+) -> Optional[object]:
     """
     Load the C++ operator overrides extension.
 
-    The extension is only loaded if:
-    1. Running on MUSA platform
-    2. TORCHADA_ENABLE_CPP_OPS=1 environment variable is set
+    The extension is only loaded if running on MUSA platform. By default, import-time
+    loading still requires TORCHADA_ENABLE_CPP_OPS=1.
 
     Args:
         force_reload: If True, reload the extension even if already loaded.
+        require_env: If True, require TORCHADA_ENABLE_CPP_OPS=1 before loading.
 
     Returns:
         The loaded extension module, or None if not loaded.
@@ -90,8 +92,7 @@ def load_cpp_ops(force_reload: bool = False) -> Optional[object]:
     if _cpp_ops_module is not None and not force_reload:
         return _cpp_ops_module
 
-    # Check if enabled via environment variable
-    if os.environ.get("TORCHADA_ENABLE_CPP_OPS") != "1":
+    if require_env and os.environ.get("TORCHADA_ENABLE_CPP_OPS") != "1":
         return None
 
     # Check if on MUSA platform

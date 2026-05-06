@@ -747,6 +747,73 @@ class TestTorchCudaMemory:
 
         assert CUDAPluggableAllocator is MUSAPluggableAllocator
 
+    def test_memory_pool_aliases(self):
+        import torch
+        import torchada
+
+        if not torchada.is_musa_platform():
+            pytest.skip("Only applicable on MUSA platform")
+
+        musa_memory = getattr(torch.musa, "memory", None)
+        if musa_memory is None:
+            pytest.skip("torch.musa.memory not available")
+        if not hasattr(musa_memory, "MemPool"):
+            pytest.skip("torch.musa.memory.MemPool not available")
+        if not hasattr(musa_memory, "use_mem_pool"):
+            pytest.skip("torch.musa.memory.use_mem_pool not available")
+
+        from torch.cuda.memory import MemPool, use_mem_pool
+
+        assert MemPool is musa_memory.MemPool
+        assert use_mem_pool is musa_memory.use_mem_pool
+        assert torch.cuda.memory.MemPool is MemPool
+        assert torch.cuda.memory.use_mem_pool is use_mem_pool
+        assert torch.cuda.MemPool is MemPool
+        assert torch.cuda.use_mem_pool is use_mem_pool
+
+    def test_allocator_pool_lifecycle_imports(self):
+        import torch
+        import torchada
+
+        if not torchada.is_musa_platform():
+            pytest.skip("Only applicable on MUSA platform")
+
+        try:
+            from torch.musa.memory import MUSAPluggableAllocator
+        except (ImportError, AttributeError):
+            pytest.skip("torch.musa.memory.MUSAPluggableAllocator not available")
+
+        from torch.cuda.memory import (
+            CUDAPluggableAllocator,
+            _cuda_beginAllocateCurrentThreadToPool,
+            _cuda_endAllocateToPool,
+            _cuda_releasePool,
+        )
+
+        lifecycle_funcs = {
+            "_cuda_beginAllocateCurrentThreadToPool": (
+                _cuda_beginAllocateCurrentThreadToPool
+            ),
+            "_cuda_endAllocateToPool": _cuda_endAllocateToPool,
+            "_cuda_releasePool": _cuda_releasePool,
+        }
+
+        assert CUDAPluggableAllocator is MUSAPluggableAllocator
+        for name, func in lifecycle_funcs.items():
+            assert getattr(torch.cuda.memory, name) is func
+            assert getattr(torch._C, name) is func
+
+        from torchada._cpp_ops import get_module
+
+        cpp_ops_module = get_module()
+        if cpp_ops_module is not None:
+            missing_names = [
+                name for name in lifecycle_funcs if not hasattr(cpp_ops_module, name)
+            ]
+            assert not missing_names
+            for name, func in lifecycle_funcs.items():
+                assert getattr(cpp_ops_module, name) is func
+
 
 class TestTorchGenerator:
     """Test torch.Generator works with cuda device on MUSA platform."""

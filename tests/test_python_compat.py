@@ -6,6 +6,8 @@ that are only available in Python 3.9+.
 """
 
 import ast
+import enum
+import importlib
 import re
 import sys
 from pathlib import Path
@@ -55,6 +57,26 @@ class TestPython38Compatibility:
         assert cuda is not None
         assert utils is not None
         assert cpp_extension is not None
+
+    def test_torchada_installs_strenum_on_old_pythons(self, monkeypatch):
+        """Importing torchada should install enum.StrEnum on Python 3.10."""
+        previous_torchada = sys.modules.pop("torchada", None)
+        monkeypatch.delattr(enum, "StrEnum", raising=False)
+        try:
+            importlib.import_module("torchada")
+
+            class TorchAdaStrEnumTest(enum.StrEnum):
+                TEXT = "text"
+                IMAGE_NONE = enum.auto()
+
+            assert TorchAdaStrEnumTest.TEXT == "text"
+            assert str(TorchAdaStrEnumTest.TEXT) == "text"
+            assert TorchAdaStrEnumTest.IMAGE_NONE == "image_none"
+            assert str(TorchAdaStrEnumTest.IMAGE_NONE) == "image_none"
+        finally:
+            sys.modules.pop("torchada", None)
+            if previous_torchada is not None:
+                sys.modules["torchada"] = previous_torchada
 
     def test_no_builtin_generic_types(self):
         """
