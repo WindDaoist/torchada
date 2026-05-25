@@ -30,6 +30,7 @@ from . import cuda, utils
 
 # C++ operator overrides are automatically loaded on MUSA platform
 from ._cpp_ops import load_cpp_ops
+from ._extension_overrides import list_registered_libraries, replace_op_impl
 from ._patch import apply_patches, get_original_init_process_group, is_patched
 from ._platform import (
     Platform,
@@ -103,6 +104,12 @@ __all__ = [
     "apply_patches",
     "is_patched",
     "get_original_init_process_group",
+    # Extension impl overrides — replace upstream `_C::<op>` impls with
+    # MUSA-native implementations while keeping the upstream op name in
+    # the FX graph so Inductor fusion patterns continue to match.
+    # See `_extension_overrides.py` for the rationale.
+    "replace_op_impl",
+    "list_registered_libraries",
     # C++ Extension building
     "CUDA_HOME",
     # Runtime name conversion utilities
